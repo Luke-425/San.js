@@ -1,15 +1,22 @@
 import './style.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import * as dat from 'lil-gui';
+
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+/**
+ * Loaders
+ */
+const gltfLoader = new GLTFLoader();
+const cubeTextureLoader = new THREE.CubeTextureLoader();
 
 /**
  * Base
  */
 // Debug
 const gui = new dat.GUI();
+const debugObject = {};
 
 // Canvas
 const canvas = document.querySelector('canvas.webgl');
@@ -18,51 +25,111 @@ const canvas = document.querySelector('canvas.webgl');
 const scene = new THREE.Scene();
 
 /**
- * Models
+ * UPDATE ALL MATERIALS
  */
-const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath('/draco/');
+const updateAllMaterials = () => {
+  scene.traverse((child) => {
+    if (
+      child instanceof THREE.Mesh &&
+      child.material instanceof THREE.MeshStandardMaterial
+    ) {
+      // console.log(child)
+      // child.material.envMap = environmentMap;
+      child.material.envMapIntensity = debugObject.envMapIntensity;
+      child.material.needsUpdate = true;
 
-const gltfLoader = new GLTFLoader();
-gltfLoader.setDRACOLoader(dracoLoader);
-
-let mixer = null;
-
-gltfLoader.load('/models/hamburger.glb', (gltf) => {
-  scene.add(gltf.scene);
-});
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+};
 
 /**
- * Floor
+ * Environment map
  */
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(50, 50),
-  new THREE.MeshStandardMaterial({
-    color: '#444444',
-    metalness: 0,
-    roughness: 0.5,
-  })
-);
-floor.receiveShadow = true;
-floor.rotation.x = -Math.PI * 0.5;
-scene.add(floor);
+const environmentMap = cubeTextureLoader.load([
+  '/textures/environmentMaps/2/px.jpg',
+  '/textures/environmentMaps/2/nx.jpg',
+  '/textures/environmentMaps/2/py.jpg',
+  '/textures/environmentMaps/2/ny.jpg',
+  '/textures/environmentMaps/2/pz.jpg',
+  '/textures/environmentMaps/2/nz.jpg',
+]);
+environmentMap.encoding = THREE.sRGBEncoding;
+scene.background = environmentMap;
+scene.environment = environmentMap;
+
+debugObject.envMapIntensity = 2.5;
+gui
+  .add(debugObject, 'envMapIntensity')
+  .min(0)
+  .max(10)
+  .step(0.001)
+  .onChange(updateAllMaterials);
+
+/**
+ * Models
+ */
+gltfLoader.load('/models/hamburger.glb', (gltf) => {
+  gltf.scene.scale.set(0.3, 0.3, 0.3);
+  gltf.scene.position.set(0, -4, 0);
+  gltf.scene.rotation.y = Math.PI * 0.5;
+  scene.add(gltf.scene);
+
+  gui
+    .add(gltf.scene.rotation, 'y')
+    .min(-Math.PI)
+    .max(Math.PI)
+    .step(0.001)
+    .name('yRotation');
+
+  updateAllMaterials();
+});
 
 /**
  * Lights
  */
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-scene.add(ambientLight);
+const directionalLight = new THREE.DirectionalLight('#ffffff', 3);
+directionalLight.position.set(0.25, 3, -2.25);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
 directionalLight.castShadow = true;
-directionalLight.shadow.mapSize.set(1024, 1024);
 directionalLight.shadow.camera.far = 15;
-directionalLight.shadow.camera.left = -7;
-directionalLight.shadow.camera.top = 7;
-directionalLight.shadow.camera.right = 7;
-directionalLight.shadow.camera.bottom = -7;
-directionalLight.position.set(5, 5, 5);
+// Quality of the shadow
+directionalLight.shadow.mapSize.set(1024, 1024);
+// Shrinks the burger so that is does not create shadows on itself (Shadow Acne)
+directionalLight.shadow.normalBias = 0.05;
+
 scene.add(directionalLight);
+
+const directionalLightCameraHelper = new THREE.CameraHelper(
+  directionalLight.shadow.camera
+);
+// scene.add(directionalLightCameraHelper)
+
+gui
+  .add(directionalLight, 'intensity')
+  .min(0)
+  .max(10)
+  .step(0.001)
+  .name('lightIntensity');
+gui
+  .add(directionalLight.position, 'x')
+  .min(-5)
+  .max(5)
+  .step(0.001)
+  .name('lightX');
+gui
+  .add(directionalLight.position, 'y')
+  .min(-5)
+  .max(5)
+  .step(0.001)
+  .name('lightY');
+gui
+  .add(directionalLight.position, 'z')
+  .min(-5)
+  .max(5)
+  .step(0.001)
+  .name('lightZ');
 
 /**
  * Sizes
@@ -96,12 +163,11 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100
 );
-camera.position.set(-8, 4, 8);
+camera.position.set(4, 1, -4);
 scene.add(camera);
 
 // Controls
 const controls = new OrbitControls(camera, canvas);
-controls.target.set(0, 1, 0);
 controls.enableDamping = true;
 
 /**
@@ -109,27 +175,42 @@ controls.enableDamping = true;
  */
 const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
+  // Active multi sampling anti-aliasing
+  antialias: true,
 });
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+// Get the same light's render between platforms!
+renderer.physicallyCorrectLights = true;
+
+renderer.outputEncoding = THREE.sRGBEncoding;
+
+renderer.toneMapping = THREE.ReinhardToneMapping;
+renderer.toneMappingExposure = 3;
+
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+gui
+  .add(renderer, 'toneMapping', {
+    No: THREE.NoToneMapping,
+    Linear: THREE.LinearToneMapping,
+    Reinhard: THREE.ReinhardToneMapping,
+    Cineon: THREE.CineonToneMapping,
+    ACESFilmic: THREE.ACESFilmicToneMapping,
+  })
+  .onFinishChange(() => {
+    renderer.toneMapping = Number(renderer.toneMapping);
+    updateAllMaterials();
+  });
+
+gui.add(renderer, 'toneMappingExposure').min(0).max(10).step(0.001);
 
 /**
  * Animate
  */
-const clock = new THREE.Clock();
-let previousTime = 0;
-
 const tick = () => {
-  const elapsedTime = clock.getElapsedTime();
-  const deltaTime = elapsedTime - previousTime;
-  previousTime = elapsedTime;
-
-  if (mixer) {
-    mixer.update(deltaTime);
-  }
-
   // Update controls
   controls.update();
 
